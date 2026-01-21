@@ -1,24 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { addDoc, collection, query, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, query, getDocs, orderBy } from 'firebase/firestore';
 import { db } from './firebase.ts';
 import { addMonths, format } from 'date-fns';
 import { useLoadScript, Autocomplete } from '@react-google-maps/api';
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
 
 const libraries: ("places")[] = ['places'];
 
 export default function Dashboard() {
-  const { register, handleSubmit, watch, setValue, reset, getValues } = useForm<any>();
+  const { register, handleSubmit, watch, setValue, reset } = useForm<any>();
   const [existingId, setExistingId] = useState<string | null>(null);
   const [allPatients, setAllPatients] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredPatients, setFilteredPatients] = useState<any[]>([]);
 
-  // -- GOOGLE MAPS --
+  // -- 1. GOOGLE MAPS SETUP --
   const { isLoaded } = useLoadScript({
-    googleMapsApiKey: "YOUR_GOOGLE_MAPS_API_KEY", // <--- PASTE KEY HERE
+    // 👇👇👇 PASTE YOUR REAL API KEY HERE OR MAPS WILL FAIL 👇👇👇
+    googleMapsApiKey: "AIzaSyD125XzyEADr4osaI-GJhO0sXha8-sfg5A", 
     libraries,
   });
   const [autocomplete, setAutocomplete] = useState<google.maps.places.Autocomplete | null>(null);
@@ -26,7 +25,7 @@ export default function Dashboard() {
   // -- LOAD PATIENTS FOR SEARCH --
   useEffect(() => {
     const loadPatients = async () => {
-      const q = query(collection(db, "patients"));
+      const q = query(collection(db, "patients"), orderBy("fullName"));
       const snap = await getDocs(q);
       setAllPatients(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     };
@@ -71,7 +70,7 @@ export default function Dashboard() {
     }
   }, [sightTestDate, recallMonths, setValue]);
 
-  // -- SUBMIT LOGIC (HANDLES BOTH NEW & EXISTING) --
+  // -- SUBMIT LOGIC (FIXED TO PREVENT CRASHES) --
   const onSubmit = async (data: any) => {
     try {
       let patientId = existingId;
@@ -81,39 +80,75 @@ export default function Dashboard() {
         const patientRef = await addDoc(collection(db, "patients"), {
           fullName: data.fullName,
           dob: data.dob,
-          address: data.address,
+          address: data.address || "", // Default to empty string if missing
           createdAt: new Date().toISOString()
         });
         patientId = patientRef.id;
       }
 
-      // 2. Add the CLINICAL RECORD to the 'records' collection
+      // 2. Add the CLINICAL RECORD (Sanitized Data)
+      // We use "|| ''" to ensure no 'undefined' values are sent to Firebase
       await addDoc(collection(db, "records"), {
-        patientId: patientId, // Links this record to the patient
-        sightTestDate: data.sightTestDate,
-        nextTestDate: data.nextTestDate,
-        recallPeriod: data.recallPeriod,
-        rx: data.rx,
-        recommendations: data.recommendations,
-        dispense: data.dispense,
-        payment: data.payment,
+        patientId: patientId, 
+        sightTestDate: data.sightTestDate || format(new Date(), 'yyyy-MM-dd'),
+        nextTestDate: data.nextTestDate || "",
+        recallPeriod: data.recallPeriod || "12",
+        
+        // Rx Data (Safe Defaults)
+        rx: {
+          right: { 
+            sph: data.rx?.right?.sph || "", 
+            cyl: data.rx?.right?.cyl || "", 
+            axis: data.rx?.right?.axis || "", 
+            add: data.rx?.right?.add || "" 
+          },
+          left: { 
+            sph: data.rx?.left?.sph || "", 
+            cyl: data.rx?.left?.cyl || "", 
+            axis: data.rx?.left?.axis || "", 
+            add: data.rx?.left?.add || "" 
+          },
+          bvd: data.rx?.bvd || "",
+          interAdd: data.rx?.interAdd || ""
+        },
+
+        recommendations: data.recommendations || "None", // Fixes the crash
+        
+        // Dispense Data (Safe Defaults)
+        dispense: {
+          type: data.dispense?.type || "SVd",
+          lensName: data.dispense?.lensName || "",
+          pd: data.dispense?.pd || "",
+          heights: data.dispense?.heights || "",
+          panto: data.dispense?.panto || "",
+          bow: data.dispense?.bow || ""
+        },
+
+        // Payment Data
+        payment: {
+          amount: data.payment?.amount || "0",
+          method: data.payment?.method || "Card",
+          discount: data.payment?.discount || ""
+        },
+
         createdAt: new Date().toISOString()
       });
 
       alert(`Record Saved! (Patient ID: ${patientId})`);
       clearForm();
-      // Reload patients in case a new one was added
-      const q = query(collection(db, "patients"));
+      
+      // Reload patients
+      const q = query(collection(db, "patients"), orderBy("fullName"));
       const snap = await getDocs(q);
       setAllPatients(snap.docs.map(d => ({ id: d.id, ...d.data() })));
 
     } catch (e) {
       console.error("Error: ", e);
-      alert("Error saving record.");
+      alert("Error saving record. Check console for details.");
     }
   };
 
-  if (!isLoaded) return <div>Loading...</div>;
+  if (!isLoaded) return <div>Loading Maps... (If stuck, check API Key)</div>;
 
   return (
     <div className="dashboard-container">
@@ -173,7 +208,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* --- CLINICAL SECTIONS (UNCHANGED) --- */}
+        {/* --- CLINICAL SECTIONS --- */}
         <h2>2. Clinical Rx</h2>
         <div className="rx-grid">
           <span></span><span className="rx-header">Sph</span><span className="rx-header">Cyl</span><span className="rx-header">Axis</span><span className="rx-header">Add</span>
@@ -183,23 +218,52 @@ export default function Dashboard() {
           <input {...register("rx.left.sph")} /><input {...register("rx.left.cyl")} /><input {...register("rx.left.axis")} /><input {...register("rx.left.add")} />
         </div>
         
+        <div style={{ display: 'flex', gap: '20px', marginTop: '15px' }}>
+          <div style={{ flex: 1 }}>
+            <label>Intermediate Add</label>
+            <input {...register("rx.interAdd")} placeholder="+1.00" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label>BVD (mm)</label>
+            <input {...register("rx.bvd")} placeholder="12" />
+          </div>
+        </div>
+
         {/* RECALL */}
         <h2>3. Recall</h2>
+        <label>Clinical Recommendations</label>
+        <textarea {...register("recommendations")} rows={2} placeholder="Notes..." style={{marginBottom:'1rem'}} />
+
         <div className="grid-form">
-          <input type="date" {...register("sightTestDate")} required />
-          <select {...register("recallPeriod")} required>
-            <option value="12">12 Months</option>
-            <option value="24">24 Months</option>
-            <option value="6">6 Months</option>
-          </select>
-          <input {...register("nextTestDate")} readOnly />
+          <div>
+            <label>Sight Test Date</label>
+            <input type="date" {...register("sightTestDate")} required />
+          </div>
+          <div>
+            <label>Recall Period</label>
+            <select {...register("recallPeriod")} required>
+              <option value="12">12 Months</option>
+              <option value="24">24 Months</option>
+              <option value="6">6 Months</option>
+            </select>
+          </div>
+          <div>
+            <label>Next Due Date</label>
+            <input {...register("nextTestDate")} readOnly style={{background:'#f3f4f6'}} />
+          </div>
         </div>
 
         {/* DISPENSE & PAYMENT */}
         <h2>4. Dispense & Payment</h2>
         <div className="grid-form">
-            <select {...register("dispense.type")}><option value="SVd">SV Distance</option><option value="Varifocal">Varifocal</option></select>
-            <input {...register("payment.amount")} placeholder="Amount £" type="number" step="0.01" />
+            <div>
+              <label>Lens Type</label>
+              <select {...register("dispense.type")}><option value="SVd">SV Distance</option><option value="Varifocal">Varifocal</option></select>
+            </div>
+            <div>
+              <label>Amount £</label>
+              <input {...register("payment.amount")} type="number" step="0.01" />
+            </div>
         </div>
 
         <button type="submit" style={{ marginTop: '2rem', width: '100%' }}>Save Clinical Record</button>
