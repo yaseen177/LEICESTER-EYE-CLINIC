@@ -1,11 +1,12 @@
-// App.jsx
+// App.tsx
 import React, { useState, useEffect } from 'react';
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { auth } from './firebase';
-import Dashboard from './Dashboard';
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut, type User } from 'firebase/auth';
+import { auth } from './firebase.ts';
+import Dashboard from './Dashboard.tsx';
 
 export default function App() {
-  const [user, setUser] = useState(null);
+  // We explicitly tell React that 'user' can be a Firebase User object or null
+  const [user, setUser] = useState<User | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(true);
@@ -18,11 +19,11 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  const handleLogin = async (e) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       await signInWithEmailAndPassword(auth, email, password);
-    } catch (error) {
+    } catch (error: any) {
       alert("Login Failed: " + error.message);
     }
   };

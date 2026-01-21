@@ -1,38 +1,39 @@
-// Dashboard.jsx
+// Dashboard.tsx
 import React, { useState } from 'react';
-import { useForm, useFieldArray } from 'react-hook-form';
+import { useForm } from 'react-hook-form';
 import { addDoc, collection } from 'firebase/firestore';
-import { db } from './firebase';
+import { db } from './firebase.ts';
 import { addMonths, format } from 'date-fns';
 import { useLoadScript, Autocomplete } from '@react-google-maps/api';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
-const libraries = ['places'];
+// Define the libraries array outside the component to prevent re-renders
+const libraries: ("places")[] = ['places'];
 
 export default function Dashboard() {
-  const { register, handleSubmit, watch, setValue, control, reset } = useForm();
+  // We use 'any' here to allow flexible form data without complex interfaces
+  const { register, handleSubmit, watch, setValue, reset } = useForm<any>();
   
-  // -- GOOGLE MAPS SETUP --
   const { isLoaded } = useLoadScript({
-    googleMapsApiKey: "YOUR_GOOGLE_MAPS_API_KEY", // INSERT KEY HERE
+    googleMapsApiKey: "YOUR_GOOGLE_MAPS_API_KEY", // Remember to replace this!
     libraries,
   });
-  const [autocomplete, setAutocomplete] = useState(null);
+  
+  const [autocomplete, setAutocomplete] = useState<google.maps.places.Autocomplete | null>(null);
 
   const onPlaceChanged = () => {
     if (autocomplete !== null) {
       const place = autocomplete.getPlace();
-      // Extract address components if needed, or just use formatted_address
-      setValue("address", place.formatted_address); 
+      if (place.formatted_address) {
+        setValue("address", place.formatted_address); 
+      }
     }
   };
 
-  // -- RECALL LOGIC --
   const sightTestDate = watch("sightTestDate");
   const recallMonths = watch("recallPeriod");
 
-  // Automatically update 'nextDue' when test date or period changes
   React.useEffect(() => {
     if (sightTestDate && recallMonths) {
       const nextDate = addMonths(new Date(sightTestDate), parseInt(recallMonths));
@@ -40,44 +41,40 @@ export default function Dashboard() {
     }
   }, [sightTestDate, recallMonths, setValue]);
 
-
-  // -- SUBMISSION HANDLER --
-  const onSubmit = async (data) => {
+  const onSubmit = async (data: any) => {
     try {
       await addDoc(collection(db, "patients"), {
         ...data,
         createdAt: new Date()
       });
       alert("Patient Record Saved!");
-      reset(); // Clear form
+      reset(); 
     } catch (e) {
       console.error("Error adding document: ", e);
       alert("Error saving record");
     }
   };
 
-  // -- REPORT GENERATION --
   const generateReport = () => {
     const doc = new jsPDF();
     doc.text("Daily Management Report", 14, 20);
     
-    // In a real app, you would fetch this data from Firestore 'dispenses' collection
-    // Here is a dummy example for the PDF blob structure
     const tableData = [
       ["John Doe", "Varifocal", "£250.00", "Card"],
       ["Jane Smith", "Single Vision", "£60.00", "Cash"],
       ["Bob Jones", "Bifocal", "£120.00", "Card"],
     ];
 
+    // @ts-ignore - jspdf-autotable sometimes has type conflict issues
     doc.autoTable({
       head: [['Patient', 'Lens Type', 'Amount', 'Method']],
       body: tableData,
       startY: 30,
     });
 
+    // @ts-ignore
     doc.text("Total Takings: £430.00", 14, doc.lastAutoTable.finalY + 10);
     
-    // Open PDF in new tab
     const pdfBlob = doc.output('bloburl');
     window.open(pdfBlob, '_blank');
   };
@@ -87,33 +84,27 @@ export default function Dashboard() {
   return (
     <div style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
       
-      {/* MANAGEMENT BUTTONS */}
       <div style={{ marginBottom: '20px', padding: '10px', background: '#eef' }}>
         <h3>Management Actions</h3>
         <button onClick={generateReport} style={{ padding: '10px' }}>Generate Daily Report (PDF)</button>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)}>
-        
-        {/* PATIENT DETAILS */}
         <h2>1. Patient Details</h2>
         <div className="grid-form">
           <input {...register("fullName")} placeholder="Full Name" required />
           <input type="date" {...register("dob")} required title="Date of Birth" />
           
-          {/* GOOGLE ADDRESS LOOKUP */}
           <Autocomplete
-            onLoad={setAutocomplete}
+            onLoad={(auto) => setAutocomplete(auto)}
             onPlaceChanged={onPlaceChanged}
           >
              <input type="text" placeholder="Start typing postcode/address..." />
           </Autocomplete>
           
-          {/* Hidden real address field linked to form data */}
           <input {...register("address")} placeholder="Selected Address" readOnly />
         </div>
 
-        {/* CLINICAL RX */}
         <h2>2. Clinical Rx</h2>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: '5px' }}>
           <strong>Eye</strong><strong>Sph</strong><strong>Cyl</strong><strong>Axis</strong><strong>Add</strong>
@@ -135,7 +126,6 @@ export default function Dashboard() {
           <label style={{marginLeft: '10px'}}>BVD: <input {...register("rx.bvd")} placeholder="12mm" /></label>
         </div>
 
-        {/* RECALL */}
         <h2>3. Recall & Recommendations</h2>
         <textarea {...register("recommendations")} placeholder="Clinical recommendations..." style={{ width: '100%', height: '60px' }} />
         
@@ -161,7 +151,6 @@ export default function Dashboard() {
           </label>
         </div>
 
-        {/* DISPENSING */}
         <h2>4. Dispensing</h2>
         <div style={{ border: '1px solid #ccc', padding: '10px' }}>
           <select {...register("dispense.type")}>
@@ -183,7 +172,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* PAYMENTS */}
         <h2>5. Payment</h2>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <input {...register("payment.amount")} type="number" step="0.01" placeholder="Total £" />
