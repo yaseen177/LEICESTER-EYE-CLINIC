@@ -2,17 +2,21 @@ import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { addDoc, collection, query, getDocs, updateDoc, doc } from 'firebase/firestore';
 import { db } from './firebase.ts';
-import { addMonths, format } from 'date-fns';
+import { addMonths, format, parseISO } from 'date-fns';
 import { useLoadScript, Autocomplete } from '@react-google-maps/api';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 const libraries: ("places")[] = ['places'];
 
+// Helper for Display Text
+const toBritishDate = (isoDate: string) => {
+  if (!isoDate) return '';
+  try { return format(parseISO(isoDate), 'dd/MM/yyyy'); } catch (e) { return isoDate; }
+};
+
 export default function Dashboard() {
   const { register, handleSubmit, watch, setValue, reset } = useForm<any>();
-  
-  // -- STATE --
   const [existingId, setExistingId] = useState<string | null>(null);
   const [allPatients, setAllPatients] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -53,7 +57,7 @@ export default function Dashboard() {
   const selectPatient = (patient: any) => {
     setExistingId(patient.id);
     setValue("fullName", patient.fullName);
-    setValue("dob", patient.dob);
+    setValue("dob", patient.dob); // Input needs yyyy-mm-dd
     setValue("address", patient.address);
     setSearchTerm('');
     setFilteredPatients([]);
@@ -65,7 +69,7 @@ export default function Dashboard() {
     setSearchTerm('');
   };
 
-  // -- CALCULATE DATES --
+  // -- DATES --
   const sightTestDate = watch("sightTestDate");
   const recallMonths = watch("recallPeriod");
   const dispenseCategory = watch("dispense.category");
@@ -77,19 +81,15 @@ export default function Dashboard() {
     }
   }, [sightTestDate, recallMonths, setValue]);
 
-  // -- SUBMIT LOGIC (UPDATED) --
+  // -- SUBMIT --
   const onSubmit = async (data: any) => {
     try {
       let patientId = existingId;
       let displayId = "";
 
-      // 1. Create Patient if New
       if (!patientId) {
         let newIdNumber = 1;
-        const ids = allPatients
-          .map(p => parseInt(p.displayId || "0"))
-          .sort((a, b) => b - a);
-        
+        const ids = allPatients.map(p => parseInt(p.displayId || "0")).sort((a, b) => b - a);
         if (ids.length > 0) newIdNumber = ids[0] + 1;
         displayId = String(newIdNumber).padStart(3, '0');
 
@@ -103,7 +103,6 @@ export default function Dashboard() {
         patientId = patientRef.id;
       }
 
-      // 2. Add Clinical Record
       await addDoc(collection(db, "records"), {
         patientId: patientId, 
         sightTestDate: data.sightTestDate || format(new Date(), 'yyyy-MM-dd'),
@@ -128,11 +127,9 @@ export default function Dashboard() {
         createdAt: new Date().toISOString() 
       });
 
-      // 3. CRITICAL UPDATE: Update the Patient Profile with the new Next Test Date
-      // This allows the Patient List filter to work efficiently
       if (patientId) {
         await updateDoc(doc(db, "patients", patientId), {
-          nextTestDate: data.nextTestDate, // <--- SAVING THIS TO PATIENT DOC NOW
+          nextTestDate: data.nextTestDate,
           lastSeen: new Date().toISOString()
         });
       }
@@ -147,7 +144,7 @@ export default function Dashboard() {
     }
   };
 
-  // -- REPORT GENERATOR --
+  // -- REPORT PDF (British Dates) --
   const generateReport = async () => {
     if (!reportDate) { alert("Select date"); return; }
     const q = query(collection(db, "records")); 
@@ -156,9 +153,11 @@ export default function Dashboard() {
 
     if (records.length === 0) { alert("No records found"); return; }
 
+    const formattedDate = toBritishDate(reportDate); // dd/mm/yyyy
+
     const doc = new jsPDF();
     doc.setFontSize(18);
-    doc.text(`Daily Takings: ${reportDate}`, 14, 20);
+    doc.text(`Daily Takings: ${formattedDate}`, 14, 20);
     
     const tableData = records.map((rec:any) => [
       rec.dispense?.category || '-', rec.dispense?.type || '-', rec.payment?.method || '-', `£${rec.payment?.amount || '0'}`
@@ -184,13 +183,17 @@ export default function Dashboard() {
           {filteredPatients.length > 0 && (
             <div style={{ position: 'absolute', top: '50px', width: '300px', background: 'white', border: '1px solid #ccc', zIndex: 100, borderRadius: '8px' }}>
               {filteredPatients.map(p => (
-                <div key={p.id} onClick={() => selectPatient(p)} style={{ padding: '10px', borderBottom: '1px solid #eee', cursor: 'pointer' }}><strong>#{p.displayId} - {p.fullName}</strong></div>
+                <div key={p.id} onClick={() => selectPatient(p)} style={{ padding: '10px', borderBottom: '1px solid #eee', cursor: 'pointer' }}>
+                  <strong>#{p.displayId} - {p.fullName}</strong>
+                  <br/><span style={{fontSize:'0.8rem', color:'#666'}}>{toBritishDate(p.dob)}</span>
+                </div>
               ))}
             </div>
           )}
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <label style={{margin:0, fontWeight: 'bold', color: '#3730a3'}}>Report Date:</label>
+          {/* Note: Input type='date' MUST be yyyy-mm-dd value, but browser shows dd/mm/yyyy */}
           <input type="date" value={reportDate} onChange={(e) => setReportDate(e.target.value)} style={{ padding: '8px', border: '1px solid #ccc' }} />
           <button onClick={generateReport} style={{background:'#059669'}}>PDF Report</button>
         </div>
@@ -200,6 +203,7 @@ export default function Dashboard() {
         <h2>1. Details {existingId && <span style={{color:'green'}}>(Existing)</span>}</h2>
         <div className="grid-form">
           <input {...register("fullName")} placeholder="Full Name" disabled={!!existingId} required />
+          {/* Form input stays type="date" (browser handles display) */}
           <input type="date" {...register("dob")} disabled={!!existingId} required />
           <div style={{ gridColumn: '1 / -1' }}>
             {!existingId && (
