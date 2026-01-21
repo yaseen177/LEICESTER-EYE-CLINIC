@@ -2,19 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { collection, getDocs, query, deleteDoc, doc } from 'firebase/firestore';
 import { db } from './firebase.ts';
 import { Link } from 'react-router-dom';
+import { format, parseISO } from 'date-fns';
+
+// HELPER: Convert 2026-06-01 -> 01/06/2026
+const toBritishDate = (isoDate: string) => {
+  if (!isoDate) return '-';
+  try { return format(parseISO(isoDate), 'dd/MM/yyyy'); } catch (e) { return isoDate; }
+};
 
 export default function PatientList() {
   const [patients, setPatients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // -- FILTER STATE --
   const [filters, setFilters] = useState({
-    id: '',
-    name: '',
-    address: '',
-    dob: '',
-    dueStart: '', // New
-    dueEnd: ''    // New
+    id: '', name: '', address: '', dob: '', dueStart: '', dueEnd: ''
   });
 
   const fetchPatients = async () => {
@@ -23,7 +24,6 @@ export default function PatientList() {
       const snap = await getDocs(q);
       const loadedPatients = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-      // Default Sort: Newest ID first
       loadedPatients.sort((a: any, b: any) => {
         const idA = parseInt(a.displayId || "0");
         const idB = parseInt(b.displayId || "0");
@@ -47,23 +47,15 @@ export default function PatientList() {
     }
   };
 
-  // -- FILTER LOGIC --
   const filteredPatients = patients.filter(p => {
-    // 1. Text Filters
     const matchId = (p.displayId || '').includes(filters.id);
     const matchName = (p.fullName || '').toLowerCase().includes(filters.name.toLowerCase());
     const matchAddress = (p.address || '').toLowerCase().includes(filters.address.toLowerCase());
     const matchDob = (p.dob || '').includes(filters.dob);
 
-    // 2. Date Range Filter (Recall)
-    // p.nextTestDate is in format "yyyy-mm-dd" (e.g. 2026-06-01)
     let matchDate = true;
-    if (filters.dueStart) {
-       if (!p.nextTestDate || p.nextTestDate < filters.dueStart) matchDate = false;
-    }
-    if (filters.dueEnd) {
-       if (!p.nextTestDate || p.nextTestDate > filters.dueEnd) matchDate = false;
-    }
+    if (filters.dueStart) { if (!p.nextTestDate || p.nextTestDate < filters.dueStart) matchDate = false; }
+    if (filters.dueEnd) { if (!p.nextTestDate || p.nextTestDate > filters.dueEnd) matchDate = false; }
 
     return matchId && matchName && matchAddress && matchDob && matchDate;
   });
@@ -81,14 +73,12 @@ export default function PatientList() {
         <Link to="/"><button>+ New Patient</button></Link>
       </div>
 
-      {/* --- FILTER BAR --- */}
       <div style={{ background: '#f3f4f6', padding: '15px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #e5e7eb' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
           <strong>🔍 Filter Database</strong>
           <button onClick={resetFilters} style={{ padding: '5px 10px', fontSize: '0.8rem', background: '#6b7280' }}>Reset Filters</button>
         </div>
         
-        {/* Row 1: Demographics */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '10px' }}>
           <input type="text" placeholder="ID (e.g. 001)" value={filters.id} onChange={e => setFilters({...filters, id: e.target.value})} style={{padding: '8px'}} />
           <input type="text" placeholder="Name" value={filters.name} onChange={e => setFilters({...filters, name: e.target.value})} style={{padding: '8px'}} />
@@ -96,7 +86,6 @@ export default function PatientList() {
           <input type="text" placeholder="DOB (YYYY-MM-DD)" value={filters.dob} onChange={e => setFilters({...filters, dob: e.target.value})} style={{padding: '8px'}} />
         </div>
 
-        {/* Row 2: Recall Management */}
         <div style={{ background: '#eff6ff', padding: '10px', borderRadius: '6px', border: '1px solid #bfdbfe' }}>
            <div style={{fontSize:'0.85rem', fontWeight:'bold', color:'#1e40af', marginBottom:'5px'}}>📞 Recall Manager: Filter by Next Due Date</div>
            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
@@ -108,7 +97,6 @@ export default function PatientList() {
         </div>
       </div>
 
-      {/* --- RESULTS TABLE --- */}
       <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
         <div style={{ padding: '10px', background: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontSize: '0.85rem', color: '#666' }}>
           Showing {filteredPatients.length} records
@@ -127,15 +115,16 @@ export default function PatientList() {
                   {p.fullName}
                 </div>
                 <div style={{color:'#666', fontSize:'0.9rem'}}>
-                  {p.dob} | {p.address}
+                  {/* BRITISH DATE HERE */}
+                  DOB: {toBritishDate(p.dob)} | {p.address}
                 </div>
               </div>
               
-              {/* NEXT DUE BADGE */}
               <div style={{ marginRight: '20px', textAlign: 'right' }}>
                  <div style={{fontSize:'0.75rem', color:'#666'}}>Next Due</div>
                  <div style={{fontWeight:'bold', color: p.nextTestDate < new Date().toISOString().split('T')[0] ? '#dc2626' : '#059669'}}>
-                   {p.nextTestDate || 'N/A'}
+                   {/* BRITISH DATE HERE */}
+                   {toBritishDate(p.nextTestDate)}
                  </div>
               </div>
 
