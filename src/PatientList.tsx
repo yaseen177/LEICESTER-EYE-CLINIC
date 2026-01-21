@@ -12,19 +12,16 @@ export default function PatientList() {
     id: '',
     name: '',
     address: '',
-    dob: ''
+    dob: '',
+    dueStart: '', // New
+    dueEnd: ''    // New
   });
 
-  // -- 1. FETCH ALL PATIENTS --
   const fetchPatients = async () => {
     try {
       const q = query(collection(db, "patients"));
       const snap = await getDocs(q);
-      
-      const loadedPatients = snap.docs.map(d => ({ 
-        id: d.id, 
-        ...d.data() 
-      }));
+      const loadedPatients = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
       // Default Sort: Newest ID first
       loadedPatients.sort((a: any, b: any) => {
@@ -41,29 +38,38 @@ export default function PatientList() {
     }
   };
 
-  useEffect(() => {
-    fetchPatients();
-  }, []);
+  useEffect(() => { fetchPatients(); }, []);
 
   const handleDelete = async (id: string, name: string) => {
-    if (confirm(`Are you sure you want to delete ${name}? This cannot be undone.`)) {
+    if (confirm(`Delete ${name}?`)) {
       await deleteDoc(doc(db, "patients", id));
       fetchPatients(); 
     }
   };
 
-  // -- 2. FILTER LOGIC --
+  // -- FILTER LOGIC --
   const filteredPatients = patients.filter(p => {
+    // 1. Text Filters
     const matchId = (p.displayId || '').includes(filters.id);
     const matchName = (p.fullName || '').toLowerCase().includes(filters.name.toLowerCase());
     const matchAddress = (p.address || '').toLowerCase().includes(filters.address.toLowerCase());
     const matchDob = (p.dob || '').includes(filters.dob);
 
-    return matchId && matchName && matchAddress && matchDob;
+    // 2. Date Range Filter (Recall)
+    // p.nextTestDate is in format "yyyy-mm-dd" (e.g. 2026-06-01)
+    let matchDate = true;
+    if (filters.dueStart) {
+       if (!p.nextTestDate || p.nextTestDate < filters.dueStart) matchDate = false;
+    }
+    if (filters.dueEnd) {
+       if (!p.nextTestDate || p.nextTestDate > filters.dueEnd) matchDate = false;
+    }
+
+    return matchId && matchName && matchAddress && matchDob && matchDate;
   });
 
   const resetFilters = () => {
-    setFilters({ id: '', name: '', address: '', dob: '' });
+    setFilters({ id: '', name: '', address: '', dob: '', dueStart: '', dueEnd: '' });
   };
 
   if (loading) return <div className="dashboard-container">Loading Database...</div>;
@@ -82,54 +88,28 @@ export default function PatientList() {
           <button onClick={resetFilters} style={{ padding: '5px 10px', fontSize: '0.8rem', background: '#6b7280' }}>Reset Filters</button>
         </div>
         
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px' }}>
-          <div>
-            <label style={{fontSize:'0.8rem', color:'#666'}}>Patient ID</label>
-            <input 
-              type="text" 
-              placeholder="e.g. 001" 
-              value={filters.id}
-              onChange={e => setFilters({...filters, id: e.target.value})}
-              style={{padding: '8px', width: '100%'}}
-            />
-          </div>
-          <div>
-            <label style={{fontSize:'0.8rem', color:'#666'}}>Full Name</label>
-            <input 
-              type="text" 
-              placeholder="Search Name..." 
-              value={filters.name}
-              onChange={e => setFilters({...filters, name: e.target.value})}
-              style={{padding: '8px', width: '100%'}}
-            />
-          </div>
-          <div>
-            <label style={{fontSize:'0.8rem', color:'#666'}}>Address / Postcode</label>
-            <input 
-              type="text" 
-              placeholder="Search Address..." 
-              value={filters.address}
-              onChange={e => setFilters({...filters, address: e.target.value})}
-              style={{padding: '8px', width: '100%'}}
-            />
-          </div>
-          <div>
-            <label style={{fontSize:'0.8rem', color:'#666'}}>Date of Birth</label>
-            <input 
-              type="text" 
-              placeholder="YYYY-MM-DD" 
-              value={filters.dob}
-              onChange={e => setFilters({...filters, dob: e.target.value})}
-              style={{padding: '8px', width: '100%'}}
-            />
-          </div>
+        {/* Row 1: Demographics */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '10px' }}>
+          <input type="text" placeholder="ID (e.g. 001)" value={filters.id} onChange={e => setFilters({...filters, id: e.target.value})} style={{padding: '8px'}} />
+          <input type="text" placeholder="Name" value={filters.name} onChange={e => setFilters({...filters, name: e.target.value})} style={{padding: '8px'}} />
+          <input type="text" placeholder="Address" value={filters.address} onChange={e => setFilters({...filters, address: e.target.value})} style={{padding: '8px'}} />
+          <input type="text" placeholder="DOB (YYYY-MM-DD)" value={filters.dob} onChange={e => setFilters({...filters, dob: e.target.value})} style={{padding: '8px'}} />
+        </div>
+
+        {/* Row 2: Recall Management */}
+        <div style={{ background: '#eff6ff', padding: '10px', borderRadius: '6px', border: '1px solid #bfdbfe' }}>
+           <div style={{fontSize:'0.85rem', fontWeight:'bold', color:'#1e40af', marginBottom:'5px'}}>📞 Recall Manager: Filter by Next Due Date</div>
+           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+             <label style={{margin:0, fontSize:'0.8rem'}}>From:</label>
+             <input type="date" value={filters.dueStart} onChange={e => setFilters({...filters, dueStart: e.target.value})} style={{padding: '6px', border:'1px solid #ccc'}} />
+             <label style={{margin:0, fontSize:'0.8rem'}}>To:</label>
+             <input type="date" value={filters.dueEnd} onChange={e => setFilters({...filters, dueEnd: e.target.value})} style={{padding: '6px', border:'1px solid #ccc'}} />
+           </div>
         </div>
       </div>
 
       {/* --- RESULTS TABLE --- */}
       <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
-        
-        {/* Results Counter */}
         <div style={{ padding: '10px', background: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontSize: '0.85rem', color: '#666' }}>
           Showing {filteredPatients.length} records
         </div>
@@ -151,16 +131,17 @@ export default function PatientList() {
                 </div>
               </div>
               
+              {/* NEXT DUE BADGE */}
+              <div style={{ marginRight: '20px', textAlign: 'right' }}>
+                 <div style={{fontSize:'0.75rem', color:'#666'}}>Next Due</div>
+                 <div style={{fontWeight:'bold', color: p.nextTestDate < new Date().toISOString().split('T')[0] ? '#dc2626' : '#059669'}}>
+                   {p.nextTestDate || 'N/A'}
+                 </div>
+              </div>
+
               <div style={{ display: 'flex', gap: '10px' }}>
-                <Link to={`/patients/${p.id}`}>
-                  <button className="secondary">View</button>
-                </Link>
-                <button 
-                  onClick={() => handleDelete(p.id, p.fullName)} 
-                  style={{background:'#fee2e2', color:'#b91c1c', border:'1px solid #fca5a5'}}
-                >
-                  Delete
-                </button>
+                <Link to={`/patients/${p.id}`}><button className="secondary">View</button></Link>
+                <button onClick={() => handleDelete(p.id, p.fullName)} style={{background:'#fee2e2', color:'#b91c1c', border:'1px solid #fca5a5'}}>Delete</button>
               </div>
             </div>
           ))
