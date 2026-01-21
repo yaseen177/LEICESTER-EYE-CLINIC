@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { addDoc, collection, query, getDocs, orderBy, limit, where } from 'firebase/firestore';
+import { addDoc, collection, query, getDocs, orderBy } from 'firebase/firestore';
 import { db } from './firebase.ts';
 import { addMonths, format } from 'date-fns';
 import { useLoadScript, Autocomplete } from '@react-google-maps/api';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable'; // <--- CHANGED IMPORT
 
 const libraries: ("places")[] = ['places'];
 
@@ -18,7 +18,7 @@ export default function Dashboard() {
 
   // -- 1. GOOGLE MAPS (UK RESTRICTED) --
   const { isLoaded } = useLoadScript({
-    googleMapsApiKey: "AIzaSyD125XzyEADr4osaI-GJhO0sXha8-sfg5A", // <--- PASTE KEY HERE
+    googleMapsApiKey: "AIzaSyD125XzyEADr4osaI-GJhO0sXha8-sfg5A", // <--- ENSURE KEY IS HERE
     libraries,
   });
   const [autocomplete, setAutocomplete] = useState<google.maps.places.Autocomplete | null>(null);
@@ -26,9 +26,11 @@ export default function Dashboard() {
   // -- LOAD PATIENTS --
   useEffect(() => {
     const loadPatients = async () => {
-      const q = query(collection(db, "patients"), orderBy("displayId", "desc"));
+      // Safe load without orderBy first to prevent permission errors
+      const q = query(collection(db, "patients"));
       const snap = await getDocs(q);
-      setAllPatients(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const loaded = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setAllPatients(loaded);
     };
     loadPatients();
   }, []);
@@ -83,13 +85,16 @@ export default function Dashboard() {
 
       // 1. New Patient Creation (with Numeric ID)
       if (!patientId) {
-        // Find last ID to increment
+        // Find last ID to increment safely
         let newIdNumber = 1;
-        if (allPatients.length > 0) {
-           // Assuming allPatients is sorted desc by displayId
-           const lastId = parseInt(allPatients[0].displayId || "0");
-           newIdNumber = lastId + 1;
+        const ids = allPatients
+          .map(p => parseInt(p.displayId || "0"))
+          .sort((a, b) => b - a); // Sort descending
+        
+        if (ids.length > 0) {
+           newIdNumber = ids[0] + 1;
         }
+        
         // Format as 001, 002 etc.
         displayId = String(newIdNumber).padStart(3, '0');
 
@@ -130,7 +135,6 @@ export default function Dashboard() {
 
       alert(`Record Saved!`);
       clearForm();
-      // Reload for new ID
       window.location.reload(); 
 
     } catch (e) {
@@ -139,32 +143,32 @@ export default function Dashboard() {
     }
   };
 
-  // -- REPORT GENERATOR --
+  // -- REPORT GENERATOR (FIXED) --
   const generateDailyReport = async () => {
     const todayStr = format(new Date(), 'yyyy-MM-dd');
     
-    // Find records created today (simple client-side filter for now)
-    const q = query(collection(db, "records")); // Ideally filter by date in query
+    // Find records created today
+    const q = query(collection(db, "records")); 
     const snap = await getDocs(q);
     const todayRecords = snap.docs
       .map(d => d.data())
-      .filter((d:any) => d.createdAt.startsWith(todayStr));
+      .filter((d:any) => d.createdAt && d.createdAt.startsWith(todayStr));
 
     const doc = new jsPDF();
     doc.setFontSize(18);
     doc.text(`Daily Takings Report: ${todayStr}`, 14, 20);
     
     const tableData = todayRecords.map((rec:any) => [
-      rec.dispense?.category,
-      rec.dispense?.type,
-      rec.payment?.method,
-      `£${rec.payment?.amount}`
+      rec.dispense?.category || '-',
+      rec.dispense?.type || '-',
+      rec.payment?.method || '-',
+      `£${rec.payment?.amount || '0'}`
     ]);
 
     let total = todayRecords.reduce((sum:number, r:any) => sum + parseFloat(r.payment?.amount || 0), 0);
 
-    // @ts-ignore
-    doc.autoTable({
+    // FIX: Explicitly pass 'doc' to autoTable
+    autoTable(doc, {
       head: [['Category', 'Type', 'Method', 'Amount']],
       body: tableData,
       startY: 30,
