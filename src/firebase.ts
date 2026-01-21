@@ -4,7 +4,7 @@ import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-    apiKey: "AIzaSyDkIUvB-KCJ7uP8-Adrw0EiEepHbfRAmZ0",
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
     authDomain: "leicester-eye-clinic.firebaseapp.com",
     projectId: "leicester-eye-clinic",
     storageBucket: "leicester-eye-clinic.firebasestorage.app",

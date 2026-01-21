@@ -25,7 +25,7 @@ export default function Dashboard() {
 
   // -- GOOGLE MAPS --
   const { isLoaded } = useLoadScript({
-    googleMapsApiKey: "AIzaSyD125XzyEADr4osaI-GJhO0sXha8-sfg5A", // <--- CHECK KEY
+    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_KEY, // <--- CHECK KEY
     libraries,
   });
   const [autocomplete, setAutocomplete] = useState<google.maps.places.Autocomplete | null>(null);
