@@ -1,93 +1,86 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, orderBy } from 'firebase/firestore';
 import { db } from './firebase.ts';
 import { format, parseISO } from 'date-fns';
 
 export default function PatientDetails() {
   const { id } = useParams();
   const [patient, setPatient] = useState<any>(null);
+  const [records, setRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchPatient = async () => {
-      if (id) {
-        const docRef = doc(db, "patients", id);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          setPatient(docSnap.data());
-        }
+    const fetchData = async () => {
+      if (!id) return;
+      
+      // 1. Get Patient Demographics
+      const pSnap = await getDoc(doc(db, "patients", id));
+      if (pSnap.exists()) {
+        setPatient(pSnap.data());
+        
+        // 2. Get All Clinical Records for this Patient
+        const q = query(collection(db, "records"), where("patientId", "==", id));
+        const rSnap = await getDocs(q);
+        
+        // Sort records by date (Client-side sort is easier for small history)
+        const sortedRecords = rSnap.docs
+          .map(d => ({ rid: d.id, ...d.data() }))
+          .sort((a: any, b: any) => new Date(b.sightTestDate).getTime() - new Date(a.sightTestDate).getTime());
+          
+        setRecords(sortedRecords);
       }
       setLoading(false);
     };
-    fetchPatient();
+    fetchData();
   }, [id]);
 
-  const formatDate = (dateString: string) => {
-    if (!dateString) return '-';
-    return format(parseISO(dateString), 'dd/MM/yyyy');
-  };
-
-  if (loading) return <div style={{padding:'2rem'}}>Loading Record...</div>;
-  if (!patient) return <div style={{padding:'2rem'}}>Patient not found.</div>;
+  if (loading) return <div>Loading...</div>;
+  if (!patient) return <div>Patient not found</div>;
 
   return (
     <div className="dashboard-container">
-      <Link to="/patients" style={{ display: 'inline-block', marginBottom: '1rem', color: '#666', textDecoration: 'none' }}>
-        ← Back to Database
-      </Link>
+      <Link to="/patients" style={{textDecoration:'none', color:'#666'}}>← Back to Directory</Link>
       
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'end', borderBottom: '2px solid #e5e7eb', paddingBottom: '1rem' }}>
-        <div>
-          <h1 style={{ margin: 0, color: '#0070f3' }}>{patient.fullName}</h1>
-          <p style={{ color: '#666' }}>{patient.address}</p>
-        </div>
-        <div style={{ textAlign: 'right' }}>
-          <strong>DOB:</strong> {formatDate(patient.dob)}<br/>
-          <strong>Next Due:</strong> <span style={{ color: '#d32f2f', fontWeight: 'bold' }}>{formatDate(patient.nextTestDate)}</span>
-        </div>
+      {/* STATIC HEADER */}
+      <div style={{ borderBottom: '2px solid #eee', paddingBottom: '1rem', marginTop: '1rem' }}>
+        <h1 style={{margin:0, color:'#0070f3'}}>{patient.fullName}</h1>
+        <p><strong>ID:</strong> {id} | <strong>DOB:</strong> {patient.dob}</p>
+        <p style={{color:'#666'}}>{patient.address}</p>
       </div>
 
-      {/* READ ONLY DISPLAY OF DATA */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginTop: '2rem' }}>
-        
-        {/* LEFT COLUMN */}
-        <div>
-          <h3>Clinical Rx</h3>
-          <div style={{ background: '#f9fafb', padding: '1rem', borderRadius: '8px', marginTop: '0.5rem' }}>
-            <p><strong>RE:</strong> {patient.rx?.right?.sph} / {patient.rx?.right?.cyl} x {patient.rx?.right?.axis} (Add {patient.rx?.right?.add})</p>
-            <p><strong>LE:</strong> {patient.rx?.left?.sph} / {patient.rx?.left?.cyl} x {patient.rx?.left?.axis} (Add {patient.rx?.left?.add})</p>
-            <p style={{marginTop: '10px', fontSize:'0.9rem'}}><strong>BVD:</strong> {patient.rx?.bvd}mm | <strong>Inter Add:</strong> {patient.rx?.interAdd}</p>
+      <h2 style={{marginTop:'2rem'}}>Clinical History ({records.length} Records)</h2>
+      
+      {records.length === 0 && <p>No exams recorded yet.</p>}
+
+      {records.map((rec) => (
+        <div key={rec.rid} style={{ background: 'white', border: '1px solid #ccc', borderRadius: '8px', marginBottom: '1.5rem', overflow: 'hidden' }}>
+          
+          {/* RECORD HEADER */}
+          <div style={{ background: '#f3f4f6', padding: '10px 20px', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #ddd' }}>
+            <strong>Test Date: {format(parseISO(rec.sightTestDate), 'dd/MM/yyyy')}</strong>
+            <span style={{color: '#0070f3'}}>Next Due: {format(parseISO(rec.nextTestDate), 'dd/MM/yyyy')}</span>
           </div>
 
-          <h3 style={{ marginTop: '2rem' }}>History & Recall</h3>
-          <p><strong>Last Test:</strong> {formatDate(patient.sightTestDate)}</p>
-          <p><strong>Recall Period:</strong> {patient.recallPeriod} Months</p>
-          <div style={{ marginTop: '1rem', background: '#fffbeb', padding: '1rem', border: '1px solid #fcd34d', borderRadius: '8px' }}>
-            <strong>Recommendations:</strong>
-            <p>{patient.recommendations}</p>
-          </div>
-        </div>
-
-        {/* RIGHT COLUMN */}
-        <div>
-          <h3>Dispensing Record</h3>
-          <div style={{ background: '#f0f9ff', padding: '1rem', borderRadius: '8px', marginTop: '0.5rem' }}>
-            <p><strong>Lens:</strong> {patient.dispense?.type} ({patient.dispense?.lensName})</p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '10px', fontSize: '0.9rem' }}>
-              <div>PD: {patient.dispense?.pd}</div>
-              <div>Heights: {patient.dispense?.heights}</div>
-              <div>Panto: {patient.dispense?.panto}</div>
-              <div>Bow: {patient.dispense?.bow}</div>
+          {/* RECORD BODY */}
+          <div style={{ padding: '20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+            <div>
+              <h4 style={{marginTop:0}}>Rx</h4>
+              <div style={{fontSize:'0.9rem', background:'#fafafa', padding:'10px', borderRadius:'4px'}}>
+                <div>RE: {rec.rx?.right?.sph} / {rec.rx?.right?.cyl} x {rec.rx?.right?.axis} (Add {rec.rx?.right?.add})</div>
+                <div>LE: {rec.rx?.left?.sph} / {rec.rx?.left?.cyl} x {rec.rx?.left?.axis} (Add {rec.rx?.left?.add})</div>
+              </div>
+            </div>
+            <div>
+              <h4 style={{marginTop:0}}>Dispense & Pay</h4>
+              <p style={{fontSize:'0.9rem'}}>
+                Lens: {rec.dispense?.type}<br/>
+                Paid: £{rec.payment?.amount} ({rec.payment?.method})
+              </p>
             </div>
           </div>
-
-          <h3 style={{ marginTop: '2rem' }}>Transaction</h3>
-          <p><strong>Total:</strong> £{patient.payment?.amount}</p>
-          <p><strong>Method:</strong> {patient.payment?.method}</p>
-          <p><strong>Discount:</strong> {patient.payment?.discount || 'None'}</p>
         </div>
-      </div>
+      ))}
     </div>
   );
 }
