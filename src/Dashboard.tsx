@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { addDoc, collection, query, getDocs, orderBy } from 'firebase/firestore';
+import { addDoc, collection, query, getDocs, orderBy, limit, where } from 'firebase/firestore';
 import { db } from './firebase.ts';
 import { addMonths, format } from 'date-fns';
 import { useLoadScript, Autocomplete } from '@react-google-maps/api';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 
 const libraries: ("places")[] = ['places'];
 
@@ -14,30 +16,30 @@ export default function Dashboard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredPatients, setFilteredPatients] = useState<any[]>([]);
 
-  // -- 1. GOOGLE MAPS SETUP --
+  // -- 1. GOOGLE MAPS (UK RESTRICTED) --
   const { isLoaded } = useLoadScript({
-    // 👇👇👇 PASTE YOUR REAL API KEY HERE OR MAPS WILL FAIL 👇👇👇
-    googleMapsApiKey: "AIzaSyD125XzyEADr4osaI-GJhO0sXha8-sfg5A", 
+    googleMapsApiKey: "AIzaSyD125XzyEADr4osaI-GJhO0sXha8-sfg5A", // <--- PASTE KEY HERE
     libraries,
   });
   const [autocomplete, setAutocomplete] = useState<google.maps.places.Autocomplete | null>(null);
 
-  // -- LOAD PATIENTS FOR SEARCH --
+  // -- LOAD PATIENTS --
   useEffect(() => {
     const loadPatients = async () => {
-      const q = query(collection(db, "patients"), orderBy("fullName"));
+      const q = query(collection(db, "patients"), orderBy("displayId", "desc"));
       const snap = await getDocs(q);
       setAllPatients(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     };
     loadPatients();
   }, []);
 
-  // -- SEARCH LOGIC --
+  // -- SEARCH --
   useEffect(() => {
     if (searchTerm.length > 1) {
+      const lower = searchTerm.toLowerCase();
       const results = allPatients.filter(p => 
-        p.fullName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-        p.address.toLowerCase().includes(searchTerm.toLowerCase())
+        (p.fullName && p.fullName.toLowerCase().includes(lower)) || 
+        (p.displayId && String(p.displayId).includes(lower))
       );
       setFilteredPatients(results);
     } else {
@@ -60,7 +62,10 @@ export default function Dashboard() {
     setSearchTerm('');
   };
 
-  // -- RECALL LOGIC --
+  // -- LOGIC: DISPENSE CATEGORIES --
+  const dispenseCategory = watch("dispense.category");
+
+  // -- LOGIC: RECALL DATES --
   const sightTestDate = watch("sightTestDate");
   const recallMonths = watch("recallPeriod");
   useEffect(() => {
@@ -70,113 +75,129 @@ export default function Dashboard() {
     }
   }, [sightTestDate, recallMonths, setValue]);
 
-  // -- SUBMIT LOGIC (FIXED TO PREVENT CRASHES) --
+  // -- SUBMIT --
   const onSubmit = async (data: any) => {
     try {
       let patientId = existingId;
+      let displayId = "";
 
-      // 1. If it's a NEW patient, create them in the 'patients' collection first
+      // 1. New Patient Creation (with Numeric ID)
       if (!patientId) {
+        // Find last ID to increment
+        let newIdNumber = 1;
+        if (allPatients.length > 0) {
+           // Assuming allPatients is sorted desc by displayId
+           const lastId = parseInt(allPatients[0].displayId || "0");
+           newIdNumber = lastId + 1;
+        }
+        // Format as 001, 002 etc.
+        displayId = String(newIdNumber).padStart(3, '0');
+
         const patientRef = await addDoc(collection(db, "patients"), {
           fullName: data.fullName,
           dob: data.dob,
-          address: data.address || "", // Default to empty string if missing
+          address: data.address || "", 
+          displayId: displayId,
           createdAt: new Date().toISOString()
         });
         patientId = patientRef.id;
       }
 
-      // 2. Add the CLINICAL RECORD (Sanitized Data)
-      // We use "|| ''" to ensure no 'undefined' values are sent to Firebase
+      // 2. Add Record
       await addDoc(collection(db, "records"), {
         patientId: patientId, 
         sightTestDate: data.sightTestDate || format(new Date(), 'yyyy-MM-dd'),
         nextTestDate: data.nextTestDate || "",
-        recallPeriod: data.recallPeriod || "12",
-        
-        // Rx Data (Safe Defaults)
-        rx: {
-          right: { 
-            sph: data.rx?.right?.sph || "", 
-            cyl: data.rx?.right?.cyl || "", 
-            axis: data.rx?.right?.axis || "", 
-            add: data.rx?.right?.add || "" 
-          },
-          left: { 
-            sph: data.rx?.left?.sph || "", 
-            cyl: data.rx?.left?.cyl || "", 
-            axis: data.rx?.left?.axis || "", 
-            add: data.rx?.left?.add || "" 
-          },
-          bvd: data.rx?.bvd || "",
-          interAdd: data.rx?.interAdd || ""
-        },
-
-        recommendations: data.recommendations || "None", // Fixes the crash
-        
-        // Dispense Data (Safe Defaults)
+        recallPeriod: data.recallPeriod,
+        rx: data.rx || {},
+        recommendations: data.recommendations || "None",
         dispense: {
-          type: data.dispense?.type || "SVd",
+          category: data.dispense?.category || "Other",
+          type: data.dispense?.type || "Other",
           lensName: data.dispense?.lensName || "",
           pd: data.dispense?.pd || "",
           heights: data.dispense?.heights || "",
           panto: data.dispense?.panto || "",
           bow: data.dispense?.bow || ""
         },
-
-        // Payment Data
         payment: {
           amount: data.payment?.amount || "0",
           method: data.payment?.method || "Card",
           discount: data.payment?.discount || ""
         },
-
         createdAt: new Date().toISOString()
       });
 
-      alert(`Record Saved! (Patient ID: ${patientId})`);
+      alert(`Record Saved!`);
       clearForm();
-      
-      // Reload patients
-      const q = query(collection(db, "patients"), orderBy("fullName"));
-      const snap = await getDocs(q);
-      setAllPatients(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      // Reload for new ID
+      window.location.reload(); 
 
     } catch (e) {
-      console.error("Error: ", e);
-      alert("Error saving record. Check console for details.");
+      console.error(e);
+      alert("Error saving record.");
     }
   };
 
-  if (!isLoaded) return <div>Loading Maps... (If stuck, check API Key)</div>;
+  // -- REPORT GENERATOR --
+  const generateDailyReport = async () => {
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    
+    // Find records created today (simple client-side filter for now)
+    const q = query(collection(db, "records")); // Ideally filter by date in query
+    const snap = await getDocs(q);
+    const todayRecords = snap.docs
+      .map(d => d.data())
+      .filter((d:any) => d.createdAt.startsWith(todayStr));
+
+    const doc = new jsPDF();
+    doc.setFontSize(18);
+    doc.text(`Daily Takings Report: ${todayStr}`, 14, 20);
+    
+    const tableData = todayRecords.map((rec:any) => [
+      rec.dispense?.category,
+      rec.dispense?.type,
+      rec.payment?.method,
+      `£${rec.payment?.amount}`
+    ]);
+
+    let total = todayRecords.reduce((sum:number, r:any) => sum + parseFloat(r.payment?.amount || 0), 0);
+
+    // @ts-ignore
+    doc.autoTable({
+      head: [['Category', 'Type', 'Method', 'Amount']],
+      body: tableData,
+      startY: 30,
+    });
+
+    // @ts-ignore
+    doc.text(`Total Revenue: £${total.toFixed(2)}`, 14, doc.lastAutoTable.finalY + 10);
+    window.open(doc.output('bloburl'), '_blank');
+  };
+
+  if (!isLoaded) return <div>Loading System...</div>;
 
   return (
     <div className="dashboard-container">
       
-      {/* --- SEARCH BAR --- */}
+      {/* SEARCH BAR */}
       <div style={{ marginBottom: '2rem', position: 'relative' }}>
         <div style={{ display: 'flex', gap: '10px' }}>
           <input 
             type="text" 
-            placeholder="🔍 Search existing patient by Name or Address..." 
+            placeholder="Search Patient (Name or ID)..." 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             style={{ border: '2px solid #0070f3' }}
           />
           <button onClick={clearForm} className="secondary">Clear / New</button>
+          <button onClick={generateDailyReport} style={{background:'#059669'}}>📊 Daily Report</button>
         </div>
-        
-        {/* DROPDOWN RESULTS */}
         {filteredPatients.length > 0 && (
-          <div style={{ position: 'absolute', top: '50px', left: 0, right: 0, background: 'white', border: '1px solid #ccc', zIndex: 100, borderRadius: '8px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+          <div style={{ position: 'absolute', top: '50px', width: '100%', background: 'white', border: '1px solid #ccc', zIndex: 100, borderRadius: '8px' }}>
             {filteredPatients.map(p => (
-              <div 
-                key={p.id} 
-                onClick={() => selectPatient(p)}
-                style={{ padding: '10px', borderBottom: '1px solid #eee', cursor: 'pointer', display: 'flex', justifyContent: 'space-between' }}
-              >
-                <strong>{p.fullName}</strong>
-                <span style={{color:'#666'}}>{p.address} (Born: {p.dob})</span>
+              <div key={p.id} onClick={() => selectPatient(p)} style={{ padding: '10px', borderBottom: '1px solid #eee', cursor: 'pointer' }}>
+                <strong>#{p.displayId} - {p.fullName}</strong> ({p.address})
               </div>
             ))}
           </div>
@@ -184,31 +205,26 @@ export default function Dashboard() {
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)}>
-        {/* DETAILS SECTION */}
-        <h2>1. Patient Details {existingId && <span style={{fontSize:'0.8rem', color:'green'}}> (✓ Existing ID: {existingId})</span>}</h2>
+        {/* 1. DETAILS */}
+        <h2>1. Patient Details {existingId && <span style={{color:'green'}}>(Existing Record)</span>}</h2>
         <div className="grid-form">
-          <div>
-            <label>Full Name</label>
-            <input {...register("fullName")} disabled={!!existingId} style={existingId ? {background:'#e5e7eb', color:'#6b7280'} : {}} required />
-          </div>
-          <div>
-            <label>Date of Birth</label>
-            <input type="date" {...register("dob")} disabled={!!existingId} style={existingId ? {background:'#e5e7eb', color:'#6b7280'} : {}} required />
-          </div>
+          <input {...register("fullName")} placeholder="Full Name" disabled={!!existingId} required />
+          <input type="date" {...register("dob")} disabled={!!existingId} required />
           <div style={{ gridColumn: '1 / -1' }}>
-            <label>Address</label>
-            {!existingId ? (
-              <Autocomplete onLoad={(auto) => setAutocomplete(auto)} onPlaceChanged={() => {
-                 if(autocomplete) setValue("address", autocomplete.getPlace().formatted_address);
-              }}>
-                 <input type="text" placeholder="Postcode search..." />
+            {!existingId && (
+              <Autocomplete 
+                onLoad={setAutocomplete} 
+                onPlaceChanged={() => { if(autocomplete) setValue("address", autocomplete.getPlace().formatted_address); }}
+                options={{ componentRestrictions: { country: "gb" } }} // UK ONLY
+              >
+                 <input type="text" placeholder="Address Lookup (UK Only)..." />
               </Autocomplete>
-            ) : null}
-            <input {...register("address")} readOnly={!!existingId} style={existingId ? {background:'#e5e7eb', color:'#6b7280'} : {}} />
+            )}
+            <input {...register("address")} readOnly={!!existingId} placeholder="Address" />
           </div>
         </div>
 
-        {/* --- CLINICAL SECTIONS --- */}
+        {/* 2. CLINICAL */}
         <h2>2. Clinical Rx</h2>
         <div className="rx-grid">
           <span></span><span className="rx-header">Sph</span><span className="rx-header">Cyl</span><span className="rx-header">Axis</span><span className="rx-header">Add</span>
@@ -218,55 +234,82 @@ export default function Dashboard() {
           <input {...register("rx.left.sph")} /><input {...register("rx.left.cyl")} /><input {...register("rx.left.axis")} /><input {...register("rx.left.add")} />
         </div>
         
-        <div style={{ display: 'flex', gap: '20px', marginTop: '15px' }}>
-          <div style={{ flex: 1 }}>
-            <label>Intermediate Add</label>
-            <input {...register("rx.interAdd")} placeholder="+1.00" />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label>BVD (mm)</label>
-            <input {...register("rx.bvd")} placeholder="12" />
-          </div>
-        </div>
-
-        {/* RECALL */}
+        {/* 3. RECALL */}
         <h2>3. Recall</h2>
-        <label>Clinical Recommendations</label>
-        <textarea {...register("recommendations")} rows={2} placeholder="Notes..." style={{marginBottom:'1rem'}} />
-
         <div className="grid-form">
-          <div>
-            <label>Sight Test Date</label>
-            <input type="date" {...register("sightTestDate")} required />
+          <input type="date" {...register("sightTestDate")} required />
+          <select {...register("recallPeriod")} required>
+            <option value="3">3 Months</option>
+            <option value="6">6 Months</option>
+            <option value="9">9 Months</option>
+            <option value="12">12 Months</option>
+            <option value="18">18 Months</option>
+            <option value="24">24 Months</option>
+          </select>
+          <input {...register("nextTestDate")} readOnly style={{background:'#f3f4f6'}} />
+        </div>
+
+        {/* 4. DISPENSE (DYNAMIC) */}
+        <h2>4. Dispensing</h2>
+        <div style={{ background: '#f9fafb', padding: '15px', borderRadius: '8px' }}>
+          <div className="grid-form">
+            <div>
+              <label>Category</label>
+              <select {...register("dispense.category")}>
+                <option value="Spectacles">Spectacles</option>
+                <option value="Contacts">Contacts</option>
+                <option value="Fees">Fees / Services</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+
+            {/* DYNAMIC SUB-OPTIONS */}
+            <div>
+              <label>Type / Item</label>
+              {dispenseCategory === "Spectacles" && (
+                <select {...register("dispense.type")}>
+                  <option value="SVD">SVD</option>
+                  <option value="SVN">SVN</option>
+                  <option value="SVI">SVI</option>
+                  <option value="BIFS">BIFS</option>
+                  <option value="VARI">VARI</option>
+                  <option value="OTHER">OTHER</option>
+                </select>
+              )}
+              {dispenseCategory === "Contacts" && (
+                <select {...register("dispense.type")}>
+                  <option value="Contact Lenses">Contact Lenses</option>
+                </select>
+              )}
+              {dispenseCategory === "Fees" && (
+                <select {...register("dispense.type")}>
+                  <option value="GOS 1">GOS 1</option>
+                  <option value="PRIVATE EYE CHECK">PRIVATE EYE CHECK</option>
+                  <option value="CONTACT LENS CHECK">CONTACT LENS CHECK</option>
+                  <option value="other">Other</option>
+                </select>
+              )}
+              {dispenseCategory === "Other" && (
+                <input {...register("dispense.type")} placeholder="Type description..." />
+              )}
+            </div>
+            
+            <input {...register("dispense.lensName")} placeholder="Lens/Product Name" />
           </div>
-          <div>
-            <label>Recall Period</label>
-            <select {...register("recallPeriod")} required>
-              <option value="12">12 Months</option>
-              <option value="24">24 Months</option>
-              <option value="6">6 Months</option>
+        </div>
+
+        {/* 5. PAYMENT */}
+        <h2>5. Payment</h2>
+        <div className="grid-form">
+            <input {...register("payment.amount")} type="number" step="0.01" placeholder="£ Amount" />
+            <select {...register("payment.method")}>
+              <option value="Card">Card</option>
+              <option value="Cash">Cash</option>
+              <option value="BACS">BACS</option>
             </select>
-          </div>
-          <div>
-            <label>Next Due Date</label>
-            <input {...register("nextTestDate")} readOnly style={{background:'#f3f4f6'}} />
-          </div>
         </div>
 
-        {/* DISPENSE & PAYMENT */}
-        <h2>4. Dispense & Payment</h2>
-        <div className="grid-form">
-            <div>
-              <label>Lens Type</label>
-              <select {...register("dispense.type")}><option value="SVd">SV Distance</option><option value="Varifocal">Varifocal</option></select>
-            </div>
-            <div>
-              <label>Amount £</label>
-              <input {...register("payment.amount")} type="number" step="0.01" />
-            </div>
-        </div>
-
-        <button type="submit" style={{ marginTop: '2rem', width: '100%' }}>Save Clinical Record</button>
+        <button type="submit" style={{ marginTop: '2rem', width: '100%' }}>Save Record</button>
       </form>
     </div>
   );
