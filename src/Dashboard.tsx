@@ -1,24 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { addDoc, collection, query, getDocs, orderBy } from 'firebase/firestore';
+import { addDoc, collection, query, getDocs } from 'firebase/firestore';
 import { db } from './firebase.ts';
 import { addMonths, format } from 'date-fns';
 import { useLoadScript, Autocomplete } from '@react-google-maps/api';
 import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable'; // <--- CHANGED IMPORT
+import autoTable from 'jspdf-autotable';
 
 const libraries: ("places")[] = ['places'];
 
 export default function Dashboard() {
   const { register, handleSubmit, watch, setValue, reset } = useForm<any>();
+  
+  // -- STATE --
   const [existingId, setExistingId] = useState<string | null>(null);
   const [allPatients, setAllPatients] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredPatients, setFilteredPatients] = useState<any[]>([]);
+  
+  // -- NEW: REPORT DATE STATE --
+  const [reportDate, setReportDate] = useState(format(new Date(), 'yyyy-MM-dd'));
 
-  // -- 1. GOOGLE MAPS (UK RESTRICTED) --
+  // -- GOOGLE MAPS --
   const { isLoaded } = useLoadScript({
-    googleMapsApiKey: "AIzaSyD125XzyEADr4osaI-GJhO0sXha8-sfg5A", // <--- ENSURE KEY IS HERE
+    googleMapsApiKey: "AIzaSyD125XzyEADr4osaI-GJhO0sXha8-sfg5A", // <--- PASTE KEY HERE
     libraries,
   });
   const [autocomplete, setAutocomplete] = useState<google.maps.places.Autocomplete | null>(null);
@@ -26,7 +31,6 @@ export default function Dashboard() {
   // -- LOAD PATIENTS --
   useEffect(() => {
     const loadPatients = async () => {
-      // Safe load without orderBy first to prevent permission errors
       const q = query(collection(db, "patients"));
       const snap = await getDocs(q);
       const loaded = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -35,7 +39,7 @@ export default function Dashboard() {
     loadPatients();
   }, []);
 
-  // -- SEARCH --
+  // -- SEARCH LOGIC --
   useEffect(() => {
     if (searchTerm.length > 1) {
       const lower = searchTerm.toLowerCase();
@@ -64,12 +68,11 @@ export default function Dashboard() {
     setSearchTerm('');
   };
 
-  // -- LOGIC: DISPENSE CATEGORIES --
+  // -- FORM WATCHERS --
   const dispenseCategory = watch("dispense.category");
-
-  // -- LOGIC: RECALL DATES --
   const sightTestDate = watch("sightTestDate");
   const recallMonths = watch("recallPeriod");
+
   useEffect(() => {
     if (sightTestDate && recallMonths) {
       const nextDate = addMonths(new Date(sightTestDate), parseInt(recallMonths));
@@ -77,25 +80,22 @@ export default function Dashboard() {
     }
   }, [sightTestDate, recallMonths, setValue]);
 
-  // -- SUBMIT --
+  // -- SUBMIT LOGIC --
   const onSubmit = async (data: any) => {
     try {
       let patientId = existingId;
       let displayId = "";
 
-      // 1. New Patient Creation (with Numeric ID)
+      // 1. New Patient Creation
       if (!patientId) {
-        // Find last ID to increment safely
         let newIdNumber = 1;
         const ids = allPatients
           .map(p => parseInt(p.displayId || "0"))
-          .sort((a, b) => b - a); // Sort descending
+          .sort((a, b) => b - a);
         
         if (ids.length > 0) {
            newIdNumber = ids[0] + 1;
         }
-        
-        // Format as 001, 002 etc.
         displayId = String(newIdNumber).padStart(3, '0');
 
         const patientRef = await addDoc(collection(db, "patients"), {
@@ -108,7 +108,7 @@ export default function Dashboard() {
         patientId = patientRef.id;
       }
 
-      // 2. Add Record
+      // 2. Add Clinical Record
       await addDoc(collection(db, "records"), {
         patientId: patientId, 
         sightTestDate: data.sightTestDate || format(new Date(), 'yyyy-MM-dd'),
@@ -130,7 +130,9 @@ export default function Dashboard() {
           method: data.payment?.method || "Card",
           discount: data.payment?.discount || ""
         },
-        createdAt: new Date().toISOString()
+        // We use the TEST DATE as the 'accounting date' for reports, 
+        // or you can use createdAt. Here we use createdAt for data integrity.
+        createdAt: new Date().toISOString() 
       });
 
       alert(`Record Saved!`);
@@ -143,31 +145,40 @@ export default function Dashboard() {
     }
   };
 
-  // -- REPORT GENERATOR (FIXED) --
-  const generateDailyReport = async () => {
-    const todayStr = format(new Date(), 'yyyy-MM-dd');
-    
-    // Find records created today
+  // -- REPORT GENERATOR (BY SELECTED DATE) --
+  const generateReport = async () => {
+    if (!reportDate) {
+      alert("Please select a date for the report.");
+      return;
+    }
+
     const q = query(collection(db, "records")); 
     const snap = await getDocs(q);
-    const todayRecords = snap.docs
+    
+    // Filter records where 'createdAt' matches the selected 'reportDate'
+    // Note: createdAt is ISO (yyyy-MM-ddTHH:mm:ss), so we match the first 10 chars
+    const records = snap.docs
       .map(d => d.data())
-      .filter((d:any) => d.createdAt && d.createdAt.startsWith(todayStr));
+      .filter((d:any) => d.createdAt && d.createdAt.startsWith(reportDate));
+
+    if (records.length === 0) {
+      alert(`No records found for ${reportDate}`);
+      return;
+    }
 
     const doc = new jsPDF();
     doc.setFontSize(18);
-    doc.text(`Daily Takings Report: ${todayStr}`, 14, 20);
+    doc.text(`Daily Takings Report: ${reportDate}`, 14, 20);
     
-    const tableData = todayRecords.map((rec:any) => [
+    const tableData = records.map((rec:any) => [
       rec.dispense?.category || '-',
       rec.dispense?.type || '-',
       rec.payment?.method || '-',
       `£${rec.payment?.amount || '0'}`
     ]);
 
-    let total = todayRecords.reduce((sum:number, r:any) => sum + parseFloat(r.payment?.amount || 0), 0);
+    let total = records.reduce((sum:number, r:any) => sum + parseFloat(r.payment?.amount || 0), 0);
 
-    // FIX: Explicitly pass 'doc' to autoTable
     autoTable(doc, {
       head: [['Category', 'Type', 'Method', 'Amount']],
       body: tableData,
@@ -184,28 +195,44 @@ export default function Dashboard() {
   return (
     <div className="dashboard-container">
       
-      {/* SEARCH BAR */}
-      <div style={{ marginBottom: '2rem', position: 'relative' }}>
-        <div style={{ display: 'flex', gap: '10px' }}>
+      {/* --- TOP BAR: SEARCH & REPORTING --- */}
+      <div style={{ marginBottom: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#eef2ff', padding: '15px', borderRadius: '8px' }}>
+        
+        {/* Left: Search */}
+        <div style={{ position: 'relative', display: 'flex', gap: '10px', flex: 1 }}>
           <input 
             type="text" 
             placeholder="Search Patient (Name or ID)..." 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            style={{ border: '2px solid #0070f3' }}
+            style={{ border: '2px solid #0070f3', maxWidth: '300px' }}
           />
-          <button onClick={clearForm} className="secondary">Clear / New</button>
-          <button onClick={generateDailyReport} style={{background:'#059669'}}>📊 Daily Report</button>
+          <button onClick={clearForm} className="secondary">Clear Form</button>
+          
+          {/* Search Dropdown */}
+          {filteredPatients.length > 0 && (
+            <div style={{ position: 'absolute', top: '50px', width: '300px', background: 'white', border: '1px solid #ccc', zIndex: 100, borderRadius: '8px' }}>
+              {filteredPatients.map(p => (
+                <div key={p.id} onClick={() => selectPatient(p)} style={{ padding: '10px', borderBottom: '1px solid #eee', cursor: 'pointer' }}>
+                  <strong>#{p.displayId} - {p.fullName}</strong>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-        {filteredPatients.length > 0 && (
-          <div style={{ position: 'absolute', top: '50px', width: '100%', background: 'white', border: '1px solid #ccc', zIndex: 100, borderRadius: '8px' }}>
-            {filteredPatients.map(p => (
-              <div key={p.id} onClick={() => selectPatient(p)} style={{ padding: '10px', borderBottom: '1px solid #eee', cursor: 'pointer' }}>
-                <strong>#{p.displayId} - {p.fullName}</strong> ({p.address})
-              </div>
-            ))}
-          </div>
-        )}
+
+        {/* Right: Reporting */}
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <label style={{margin:0, fontWeight: 'bold', color: '#3730a3'}}>Report Date:</label>
+          <input 
+            type="date" 
+            value={reportDate} 
+            onChange={(e) => setReportDate(e.target.value)} 
+            style={{ padding: '8px', border: '1px solid #ccc' }} 
+          />
+          <button onClick={generateReport} style={{background:'#059669'}}>Generate PDF</button>
+        </div>
+
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)}>
@@ -219,7 +246,7 @@ export default function Dashboard() {
               <Autocomplete 
                 onLoad={setAutocomplete} 
                 onPlaceChanged={() => { if(autocomplete) setValue("address", autocomplete.getPlace().formatted_address); }}
-                options={{ componentRestrictions: { country: "gb" } }} // UK ONLY
+                options={{ componentRestrictions: { country: "gb" } }} 
               >
                  <input type="text" placeholder="Address Lookup (UK Only)..." />
               </Autocomplete>
