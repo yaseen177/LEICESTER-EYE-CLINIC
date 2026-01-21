@@ -154,3 +154,9 @@ button.secondary {
 .login-container input {
   margin-bottom: 1rem;
 }
+
+/* Table Hover Effect */
+tbody tr:hover {
+  background-color: #f9fafb;
+  cursor: pointer;
+}

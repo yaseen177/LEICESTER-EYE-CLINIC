@@ -1,22 +1,22 @@
-// Dashboard.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { addDoc, collection } from 'firebase/firestore';
+import { addDoc, collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { db } from './firebase.ts';
 import { addMonths, format } from 'date-fns';
 import { useLoadScript, Autocomplete } from '@react-google-maps/api';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
-// Define the libraries array outside the component to prevent re-renders
+// Define libraries outside component to prevent re-renders
 const libraries: ("places")[] = ['places'];
 
 export default function Dashboard() {
-  // We use 'any' here to allow flexible form data without complex interfaces
   const { register, handleSubmit, watch, setValue, reset } = useForm<any>();
   
+  // -- 1. GOOGLE MAPS SETUP --
   const { isLoaded } = useLoadScript({
-    googleMapsApiKey: "YOUR_GOOGLE_MAPS_API_KEY", // Remember to replace this!
+    // PASTE YOUR API KEY BELOW INSIDE THE QUOTES
+    googleMapsApiKey: "AIzaSyD125XzyEADr4osaI-GJhO0sXha8-sfg5A", 
     libraries,
   });
   
@@ -31,16 +31,34 @@ export default function Dashboard() {
     }
   };
 
+  // -- 2. PATIENT LIST STATE (For the Table) --
+  const [patients, setPatients] = useState<any[]>([]);
+
+  // Fetch patients in real-time
+  useEffect(() => {
+    const q = query(collection(db, "patients"), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const patientsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setPatients(patientsData);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // -- 3. RECALL DATE LOGIC --
   const sightTestDate = watch("sightTestDate");
   const recallMonths = watch("recallPeriod");
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (sightTestDate && recallMonths) {
       const nextDate = addMonths(new Date(sightTestDate), parseInt(recallMonths));
       setValue("nextTestDate", format(nextDate, 'yyyy-MM-dd'));
     }
   }, [sightTestDate, recallMonths, setValue]);
 
+  // -- 4. SAVE TO FIREBASE --
   const onSubmit = async (data: any) => {
     try {
       await addDoc(collection(db, "patients"), {
@@ -48,24 +66,26 @@ export default function Dashboard() {
         createdAt: new Date()
       });
       alert("Patient Record Saved!");
-      reset(); 
+      reset(); // Clear form
     } catch (e) {
       console.error("Error adding document: ", e);
-      alert("Error saving record");
+      alert("Error saving record. Check console.");
     }
   };
 
+  // -- 5. REPORT GENERATION --
   const generateReport = () => {
     const doc = new jsPDF();
     doc.text("Daily Management Report", 14, 20);
     
+    // Example data - in future you can replace this with real data from 'patients'
     const tableData = [
       ["John Doe", "Varifocal", "£250.00", "Card"],
       ["Jane Smith", "Single Vision", "£60.00", "Cash"],
       ["Bob Jones", "Bifocal", "£120.00", "Card"],
     ];
 
-    // @ts-ignore - jspdf-autotable sometimes has type conflict issues
+    // @ts-ignore
     doc.autoTable({
       head: [['Patient', 'Lens Type', 'Amount', 'Method']],
       body: tableData,
@@ -79,21 +99,20 @@ export default function Dashboard() {
     window.open(pdfBlob, '_blank');
   };
 
-  if (!isLoaded) return <div>Loading Maps...</div>;
+  if (!isLoaded) return <div style={{padding: '2rem'}}>Loading System Maps...</div>;
 
   return (
-    // CHANGED: Added className="dashboard-container"
-    <div className="dashboard-container"> 
+    <div className="dashboard-container">
       
-      {/* Management Header */}
+      {/* HEADER ACTIONS */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', padding: '1rem', background: '#eef2ff', borderRadius: '8px' }}>
-        <h3 style={{ margin: 0, color: '#3730a3' }}>Admin Actions</h3>
+        <h3 style={{ margin: 0, color: '#3730a3' }}>Clinical Dashboard</h3>
         <button onClick={generateReport}>Generate Daily Report (PDF)</button>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)}>
         
-        {/* PATIENT DETAILS */}
+        {/* SECTION 1: DETAILS */}
         <h2>1. Patient Details</h2>
         <div className="grid-form">
           <div>
@@ -113,12 +132,12 @@ export default function Dashboard() {
             >
                <input type="text" placeholder="Start typing postcode or address..." />
             </Autocomplete>
-            {/* Hidden field for logic, but we show the user the lookup box above */}
+            {/* Hidden field that actually stores the address string */}
             <input type="hidden" {...register("address")} />
           </div>
         </div>
 
-        {/* CLINICAL RX - CHANGED TO USE CSS GRID */}
+        {/* SECTION 2: CLINICAL RX */}
         <h2>2. Clinical Rx</h2>
         <div className="rx-grid">
           {/* Header Row */}
@@ -154,7 +173,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* RECALL */}
+        {/* SECTION 3: RECALL */}
         <h2>3. Recall & Recommendations</h2>
         <label>Clinical Notes</label>
         <textarea {...register("recommendations")} rows={3} placeholder="Enter clinical recommendations here..." />
@@ -171,6 +190,8 @@ export default function Dashboard() {
               <option value="24">24 Months</option>
               <option value="6">6 Months</option>
               <option value="3">3 Months</option>
+              <option value="9">9 Months</option>
+              <option value="18">18 Months</option>
             </select>
           </div>
           <div>
@@ -179,7 +200,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* DISPENSING */}
+        {/* SECTION 4: DISPENSING */}
         <h2>4. Dispensing</h2>
         <div style={{ background: '#f9fafb', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
           <div className="grid-form">
@@ -206,7 +227,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* PAYMENT */}
+        {/* SECTION 5: PAYMENT */}
         <h2>5. Payment</h2>
         <div className="grid-form" style={{ alignItems: 'end' }}>
           <div>
@@ -231,6 +252,62 @@ export default function Dashboard() {
           Save Patient Record
         </button>
       </form>
+
+      {/* ------------------------------------------- */}
+      {/* PATIENT RECORDS TABLE (EXCEL STYLE)         */}
+      {/* ------------------------------------------- */}
+      <div style={{ marginTop: '4rem', borderTop: '2px solid #e5e7eb', paddingTop: '2rem' }}>
+        <h2 style={{ borderBottom: 'none', marginBottom: '1rem' }}>Patient Database</h2>
+        
+        <div style={{ overflowX: 'auto', background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', textAlign: 'left' }}>
+            <thead style={{ background: '#f9fafb', borderBottom: '2px solid #e5e7eb' }}>
+              <tr>
+                <th style={{ padding: '12px', fontWeight: '600', color: '#374151' }}>Full Name</th>
+                <th style={{ padding: '12px', fontWeight: '600', color: '#374151' }}>DOB</th>
+                <th style={{ padding: '12px', fontWeight: '600', color: '#374151' }}>Address</th>
+                <th style={{ padding: '12px', fontWeight: '600', color: '#374151' }}>Test Date</th>
+                <th style={{ padding: '12px', fontWeight: '600', color: '#374151' }}>Next Due</th>
+                <th style={{ padding: '12px', fontWeight: '600', color: '#374151' }}>Recall</th>
+              </tr>
+            </thead>
+            <tbody>
+              {patients.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ padding: '20px', textAlign: 'center', color: '#6b7280' }}>
+                    No records found. Add a patient above to see them here.
+                  </td>
+                </tr>
+              ) : (
+                patients.map((patient) => (
+                  <tr key={patient.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                    <td style={{ padding: '12px', fontWeight: '500' }}>{patient.fullName}</td>
+                    <td style={{ padding: '12px', color: '#6b7280' }}>{patient.dob}</td>
+                    <td style={{ padding: '12px', maxWidth: '200px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: '#6b7280' }}>
+                      {patient.address}
+                    </td>
+                    <td style={{ padding: '12px' }}>{patient.sightTestDate}</td>
+                    <td style={{ padding: '12px', color: '#0070f3', fontWeight: '500' }}>{patient.nextTestDate}</td>
+                    <td style={{ padding: '12px' }}>
+                      <span style={{ 
+                        background: '#eff6ff', 
+                        color: '#1e40af', 
+                        padding: '2px 8px', 
+                        borderRadius: '12px', 
+                        fontSize: '0.75rem',
+                        fontWeight: '600'
+                      }}>
+                        {patient.recallPeriod} Mths
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
     </div>
   );
 }
