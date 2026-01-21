@@ -82,108 +82,152 @@ export default function Dashboard() {
   if (!isLoaded) return <div>Loading Maps...</div>;
 
   return (
-    <div style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
+    // CHANGED: Added className="dashboard-container"
+    <div className="dashboard-container"> 
       
-      <div style={{ marginBottom: '20px', padding: '10px', background: '#eef' }}>
-        <h3>Management Actions</h3>
-        <button onClick={generateReport} style={{ padding: '10px' }}>Generate Daily Report (PDF)</button>
+      {/* Management Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', padding: '1rem', background: '#eef2ff', borderRadius: '8px' }}>
+        <h3 style={{ margin: 0, color: '#3730a3' }}>Admin Actions</h3>
+        <button onClick={generateReport}>Generate Daily Report (PDF)</button>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)}>
+        
+        {/* PATIENT DETAILS */}
         <h2>1. Patient Details</h2>
         <div className="grid-form">
-          <input {...register("fullName")} placeholder="Full Name" required />
-          <input type="date" {...register("dob")} required title="Date of Birth" />
+          <div>
+             <label>Full Name</label>
+             <input {...register("fullName")} placeholder="e.g. John Doe" required />
+          </div>
+          <div>
+             <label>Date of Birth</label>
+             <input type="date" {...register("dob")} required />
+          </div>
           
-          <Autocomplete
-            onLoad={(auto) => setAutocomplete(auto)}
-            onPlaceChanged={onPlaceChanged}
-          >
-             <input type="text" placeholder="Start typing postcode/address..." />
-          </Autocomplete>
-          
-          <input {...register("address")} placeholder="Selected Address" readOnly />
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label>Address Lookup</label>
+            <Autocomplete
+              onLoad={(auto) => setAutocomplete(auto)}
+              onPlaceChanged={onPlaceChanged}
+            >
+               <input type="text" placeholder="Start typing postcode or address..." />
+            </Autocomplete>
+            {/* Hidden field for logic, but we show the user the lookup box above */}
+            <input type="hidden" {...register("address")} />
+          </div>
         </div>
 
+        {/* CLINICAL RX - CHANGED TO USE CSS GRID */}
         <h2>2. Clinical Rx</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: '5px' }}>
-          <strong>Eye</strong><strong>Sph</strong><strong>Cyl</strong><strong>Axis</strong><strong>Add</strong>
-          <span>R</span>
+        <div className="rx-grid">
+          {/* Header Row */}
+          <span></span>
+          <span className="rx-header">Sph</span>
+          <span className="rx-header">Cyl</span>
+          <span className="rx-header">Axis</span>
+          <span className="rx-header">Add</span>
+
+          {/* Right Eye */}
+          <strong>RE</strong>
           <input {...register("rx.right.sph")} placeholder="+0.00" />
           <input {...register("rx.right.cyl")} placeholder="-0.00" />
           <input {...register("rx.right.axis")} placeholder="000" />
           <input {...register("rx.right.add")} placeholder="+2.00" />
           
-          <span>L</span>
+          {/* Left Eye */}
+          <strong>LE</strong>
           <input {...register("rx.left.sph")} placeholder="+0.00" />
           <input {...register("rx.left.cyl")} placeholder="-0.00" />
           <input {...register("rx.left.axis")} placeholder="000" />
           <input {...register("rx.left.add")} placeholder="+2.00" />
         </div>
         
-        <div style={{ marginTop: '10px' }}>
-          <label>Intermediate Add: <input {...register("rx.interAdd")} placeholder="+1.00" /></label>
-          <label style={{marginLeft: '10px'}}>BVD: <input {...register("rx.bvd")} placeholder="12mm" /></label>
-        </div>
-
-        <h2>3. Recall & Recommendations</h2>
-        <textarea {...register("recommendations")} placeholder="Clinical recommendations..." style={{ width: '100%', height: '60px' }} />
-        
-        <div style={{ display: 'flex', gap: '20px', marginTop: '10px' }}>
-          <label>
-            Sight Test Date:
-            <input type="date" {...register("sightTestDate")} required />
-          </label>
-          <label>
-            Recall Period (Months):
-            <select {...register("recallPeriod")} required>
-              <option value="3">3 Months</option>
-              <option value="6">6 Months</option>
-              <option value="9">9 Months</option>
-              <option value="12">12 Months</option>
-              <option value="18">18 Months</option>
-              <option value="24">24 Months</option>
-            </select>
-          </label>
-          <label>
-            Next Due:
-            <input {...register("nextTestDate")} readOnly style={{ background: '#eee' }} />
-          </label>
-        </div>
-
-        <h2>4. Dispensing</h2>
-        <div style={{ border: '1px solid #ccc', padding: '10px' }}>
-          <select {...register("dispense.type")}>
-            <option value="SVd">Single Vision Distance (SVd)</option>
-            <option value="SVn">Single Vision Near (SVn)</option>
-            <option value="SVi">Single Vision Intermediate (SVi)</option>
-            <option value="Bifocal_DV_NV">Bifocal (DV+NV)</option>
-            <option value="Bifocal_DV_IV">Bifocal (DV+IV)</option>
-            <option value="Varifocal">Varifocal</option>
-          </select>
-          
-          <input {...register("dispense.lensName")} placeholder="Manual Lens Name (e.g. Varilux X)" style={{ width: '100%', marginTop: '5px' }} />
-          
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '10px' }}>
-            <input {...register("dispense.pd")} placeholder="PD (64mm)" />
-            <input {...register("dispense.heights")} placeholder="Heights" />
-            <input {...register("dispense.panto")} placeholder="Pantoscopic Tilt" />
-            <input {...register("dispense.bow")} placeholder="Bow Angle" />
+        <div style={{ display: 'flex', gap: '20px', marginTop: '15px' }}>
+          <div style={{ flex: 1 }}>
+            <label>Intermediate Add</label>
+            <input {...register("rx.interAdd")} placeholder="+1.00" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label>BVD (mm)</label>
+            <input {...register("rx.bvd")} placeholder="12" />
           </div>
         </div>
 
-        <h2>5. Payment</h2>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <input {...register("payment.amount")} type="number" step="0.01" placeholder="Total £" />
-          <select {...register("payment.method")}>
-            <option value="Card">Card</option>
-            <option value="Cash">Cash</option>
-            <option value="BACS">BACS</option>
-          </select>
-          <input {...register("payment.discount")} placeholder="Discount Code/Amount" />
+        {/* RECALL */}
+        <h2>3. Recall & Recommendations</h2>
+        <label>Clinical Notes</label>
+        <textarea {...register("recommendations")} rows={3} placeholder="Enter clinical recommendations here..." />
+        
+        <div className="grid-form" style={{ marginTop: '1rem' }}>
+          <div>
+            <label>Sight Test Date</label>
+            <input type="date" {...register("sightTestDate")} required />
+          </div>
+          <div>
+            <label>Recall Period</label>
+            <select {...register("recallPeriod")} required>
+              <option value="12">12 Months</option>
+              <option value="24">24 Months</option>
+              <option value="6">6 Months</option>
+              <option value="3">3 Months</option>
+            </select>
+          </div>
+          <div>
+            <label>Next Due Date</label>
+            <input {...register("nextTestDate")} readOnly style={{ background: '#f3f4f6', cursor: 'not-allowed' }} />
+          </div>
         </div>
 
-        <button type="submit" style={{ marginTop: '20px', padding: '15px', width: '100%', fontSize: '1.2rem', background: '#0070f3', color: 'white', border: 'none', cursor: 'pointer' }}>
+        {/* DISPENSING */}
+        <h2>4. Dispensing</h2>
+        <div style={{ background: '#f9fafb', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+          <div className="grid-form">
+            <div>
+              <label>Lens Type</label>
+              <select {...register("dispense.type")}>
+                <option value="SVd">Single Vision Distance</option>
+                <option value="Varifocal">Varifocal</option>
+                <option value="Bifocal">Bifocal</option>
+                <option value="SVn">Reading / Near</option>
+              </select>
+            </div>
+            <div>
+              <label>Lens Product Name</label>
+              <input {...register("dispense.lensName")} placeholder="e.g. Varilux Comfort Max" />
+            </div>
+          </div>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginTop: '1rem' }}>
+            <div><label>PD</label><input {...register("dispense.pd")} /></div>
+            <div><label>Heights</label><input {...register("dispense.heights")} /></div>
+            <div><label>Panto</label><input {...register("dispense.panto")} /></div>
+            <div><label>Bow</label><input {...register("dispense.bow")} /></div>
+          </div>
+        </div>
+
+        {/* PAYMENT */}
+        <h2>5. Payment</h2>
+        <div className="grid-form" style={{ alignItems: 'end' }}>
+          <div>
+            <label>Total Amount (£)</label>
+            <input {...register("payment.amount")} type="number" step="0.01" />
+          </div>
+          <div>
+            <label>Method</label>
+            <select {...register("payment.method")}>
+              <option value="Card">Card</option>
+              <option value="Cash">Cash</option>
+              <option value="BACS">BACS</option>
+            </select>
+          </div>
+          <div>
+             <label>Discount Code</label>
+             <input {...register("payment.discount")} />
+          </div>
+        </div>
+
+        <button type="submit" style={{ marginTop: '2rem', width: '100%', fontSize: '1.1rem' }}>
           Save Patient Record
         </button>
       </form>
